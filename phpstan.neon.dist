@@ -1,0 +1,7 @@
+parameters:
+    level: max
+    paths:
+        - src
+        - tests/Fixtures
+        - tests/TenantTestCase.php
+    tmpDir: build/phpstan

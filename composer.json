@@ -1,0 +1,108 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "dashworthy/tenancy",
+    "description": "Generic stancl/tenancy v3 glue: lifecycle listeners, bootstrappers, tenant-aware commands and Pest tenant databases.",
+    "keywords": [
+        "laravel",
+        "dashworthy",
+        "tenancy"
+    ],
+    "homepage": "https://github.com/dashworthy/tenancy",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Andrew Leach",
+            "email": "7387639+andyleach@users.noreply.github.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "illuminate/contracts": "^13.0",
+        "spatie/laravel-permission": "^8.3",
+        "stancl/tenancy": "^3.10"
+    },
+    "require-dev": {
+        "larastan/larastan": "^3.9",
+        "laravel/pint": "^1.29",
+        "laravel/pao": "^1.0",
+        "orchestra/testbench": "^11.0",
+        "pestphp/pest": "^4.6||^5.0",
+        "pestphp/pest-plugin-laravel": "^4.1||^5.0",
+        "pestphp/pest-plugin-type-coverage": "^4.0||^5.0",
+        "phpstan/extension-installer": "^1.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Dashworthy\\Tenancy\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Dashworthy\\Tenancy\\Tests\\": "tests/",
+            "Workbench\\App\\": "workbench/app/",
+            "Workbench\\Database\\Factories\\": "workbench/database/factories/",
+            "Workbench\\Database\\Seeders\\": "workbench/database/seeders/"
+        }
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@clear",
+            "@prepare"
+        ],
+        "prepare": [
+            "@php vendor/bin/testbench package:discover --ansi"
+        ],
+        "build": [
+            "@php vendor/bin/testbench workbench:build --ansi"
+        ],
+        "serve": [
+            "Composer\\Config::disableProcessTimeout",
+            "@build",
+            "@php vendor/bin/testbench serve --ansi"
+        ],
+        "lint": [
+            "vendor/bin/pint --parallel"
+        ],
+        "lint:check": [
+            "vendor/bin/pint --parallel --test"
+        ],
+        "analyse": [
+            "vendor/bin/phpstan analyse"
+        ],
+        "test:types": [
+            "vendor/bin/pest --type-coverage --min=100"
+        ],
+        "test:unit": [
+            "vendor/bin/pest --parallel"
+        ],
+        "test": [
+            "@analyse",
+            "@lint:check",
+            "@test:types",
+            "@test:unit"
+        ],
+        "test:mutate": [
+            "vendor/bin/pest --mutate --parallel --min=100 --ignore-min-score-on-zero-mutations"
+        ],
+        "clear": [
+            "@php vendor/bin/testbench package:purge-skeleton --ansi"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Dashworthy\\Tenancy\\TenancyServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
