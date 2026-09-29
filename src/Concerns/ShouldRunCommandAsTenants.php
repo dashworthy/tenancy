@@ -21,6 +21,17 @@ use UnexpectedValueException;
  * example, only tenants whose database is ready). The command's exit code is
  * the last non-zero result any tenant returned.
  *
+ * Limitations:
+ * - The `--tenants` option is added by the trait's constructor, which a
+ *   command's own __construct() replaces; parent::__construct() then reaches
+ *   Command, not the trait. Such a command must call parent::__construct()
+ *   and then $this->specifyParameters(), or it loses `--tenants`.
+ * - stancl's TenantAwareCommand::execute() replaces Command::execute(), so
+ *   Isolatable, $this->fail() and __invoke()-style commands are not handled;
+ *   only handle() runs.
+ * - Tenants run one after another; an exception thrown for one tenant stops the
+ *   run, and the remaining tenants are skipped.
+ *
  * @phpstan-require-extends Command
  */
 trait ShouldRunCommandAsTenants

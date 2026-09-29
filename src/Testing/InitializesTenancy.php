@@ -8,11 +8,13 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\ParallelTesting;
 use LogicException;
 use PHPUnit\Framework\Attributes\AfterClass;
 use PHPUnit\Framework\TestCase;
+use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Contracts\Tenant;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 
@@ -43,8 +45,25 @@ trait InitializesTenancy
      */
     private static array $builtTenantTemplates = [];
 
+    /**
+     * Also queues an end of tenancy ahead of every other teardown callback.
+     *
+     * RefreshDatabase rolls back the transaction on config('database.default')
+     * from a beforeApplicationDestroyed() callback registered before this
+     * trait's tearDown. Laravel runs those callbacks first registered first, so
+     * while tenancy is still initialized it would roll back the tenant
+     * connection and leave the central transaction open. Testbench runs them
+     * in reverse, which is why the order only bites in an application.
+     *
+     * Only Laravel's and Testbench's setUpTraits() call this hook, and both
+     * test cases declare the callbacks property it prepends to.
+     */
     protected function setUpInitializesTenancy(): void
     {
+        array_unshift($this->beforeApplicationDestroyedCallbacks, function (): void {
+            tenancy()->end();
+        });
+
         config([
             'tenancy.database.prefix' => config()->string('tenancy.database.prefix').'test'.$this->parallelTestToken().'_',
             'tenancy.database.suffix' => '.sqlite',
@@ -120,7 +139,8 @@ trait InitializesTenancy
      * and never a real tenant id. So a tenant-aware job dispatched while seeding
      * fails with TenantCouldNotBeIdentifiedById under QueueTenancyBootstrapper,
      * instead of silently running against the central connection. Whatever
-     * tenant was initialized before is initialized again after.
+     * tenant was initialized before is initialized again after, even when the
+     * build fails; a failed build also deletes the half-built file.
      */
     private function tenantTemplatePath(): string
     {
@@ -144,16 +164,32 @@ trait InitializesTenancy
         $template->setAttribute($template->getKeyName(), PHP_INT_MIN);
         $template->setInternal('db_name', basename($path));
 
-        tenancy()->initialize($template);
+        $built = false;
 
-        Artisan::call('migrate', config()->array('tenancy.migration_parameters'));
+        try {
+            tenancy()->initialize($template);
 
-        $this->seedTenantTemplate();
+            if (DB::connection()->getDatabaseName() !== $path) {
+                throw new LogicException('InitializesTenancy needs '.DatabaseTenancyBootstrapper::class.' in tenancy.bootstrappers; without it the tenant template would be migrated into the current database.');
+            }
 
-        tenancy()->end();
+            if (Artisan::call('migrate', config()->array('tenancy.migration_parameters')) !== 0) {
+                throw new LogicException('Migrating the tenant template failed: '.trim(Artisan::output()));
+            }
 
-        if ($previous instanceof Tenant) {
-            tenancy()->initialize($previous);
+            $this->seedTenantTemplate();
+
+            $built = true;
+        } finally {
+            tenancy()->end();
+
+            if (! $built) {
+                File::delete($path);
+            }
+
+            if ($previous instanceof Tenant) {
+                tenancy()->initialize($previous);
+            }
         }
 
         self::$builtTenantTemplates[$path] = $path;

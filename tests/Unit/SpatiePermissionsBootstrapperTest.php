@@ -7,6 +7,8 @@ use Dashworthy\Tenancy\TenancyServiceProvider;
 use Dashworthy\Tenancy\Tests\Fixtures\Tenant;
 use Illuminate\Cache\CacheManager;
 use Spatie\Permission\PermissionRegistrar;
+use Stancl\Tenancy\Contracts\UniqueIdentifierGenerator;
+use Stancl\Tenancy\UUIDGenerator;
 
 mutates(SpatiePermissionsBootstrapper::class, TenancyServiceProvider::class);
 
@@ -21,6 +23,14 @@ it('scopes the permission cache key to the tenant', function (): void {
     tenancy()->initialize(new Tenant(['id' => 7]));
 
     expect(app(PermissionRegistrar::class)->cacheKey)->toBe('spatie.permission.cache.tenant.7');
+});
+
+it('scopes the cache key for string tenant keys', function (): void {
+    app()->bind(UniqueIdentifierGenerator::class, UUIDGenerator::class);
+
+    tenancy()->initialize(new Tenant(['id' => 'acme']));
+
+    expect(app(PermissionRegistrar::class)->cacheKey)->toBe('spatie.permission.cache.tenant.acme');
 });
 
 it('restores the configured cache key when tenancy ends', function (): void {

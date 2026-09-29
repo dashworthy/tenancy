@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
+use Dashworthy\Tenancy\Bootstrappers\SpatiePermissionsBootstrapper;
 use Dashworthy\Tenancy\Testing\InitializesTenancy;
 use Dashworthy\Tenancy\Tests\Fixtures\FactoryTenant;
+use Dashworthy\Tenancy\Tests\Fixtures\FailingMigrateCommand;
 use Dashworthy\Tenancy\Tests\Fixtures\InsertNoteJob;
 use Dashworthy\Tenancy\Tests\Fixtures\NonModelTenant;
 use Dashworthy\Tenancy\Tests\Fixtures\PlainTenant;
 use Dashworthy\Tenancy\Tests\TenantTestCase;
+use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Database\Events\MigrationsStarted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -100,14 +103,74 @@ it('fails loudly instead of seeding central when template seeding dispatches a t
         ->and(tenancy()->central(fn (): bool => Schema::hasTable('notes')))->toBeFalse();
 });
 
+it('restores the previous tenant and deletes the half-built template when seeding throws', function (): void {
+    $template = database_path('tenancy_template_'.(ParallelTesting::token() ?: '0').'.sqlite');
+    TenantTestCase::$whileSeedingTemplate = function (): void {
+        throw new RuntimeException('Seeding failed.');
+    };
+    unlink($template);
+
+    expect(fn () => $this->createTenantWithDatabase())->toThrow(RuntimeException::class, 'Seeding failed.')
+        ->and(tenant()?->getTenantKey())->toBe($this->tenant->getTenantKey())
+        ->and(DB::connection()->getDatabaseName())->toBe(database_path((string) $this->tenant->database()->getName()))
+        ->and(is_file($template))->toBeFalse();
+});
+
+it('ends tenancy after a failed template build outside tenancy', function (): void {
+    tenancy()->end();
+    TenantTestCase::$whileSeedingTemplate = function (): void {
+        throw new RuntimeException('Seeding failed.');
+    };
+    unlink(database_path('tenancy_template_'.(ParallelTesting::token() ?: '0').'.sqlite'));
+
+    expect(fn () => $this->createTenantWithDatabase())->toThrow(RuntimeException::class, 'Seeding failed.')
+        ->and(tenancy()->initialized)->toBeFalse()
+        ->and(DB::getDefaultConnection())->toBe('testing');
+});
+
+it('fails loudly when migrating the template reports failure', function (): void {
+    $template = database_path('tenancy_template_'.(ParallelTesting::token() ?: '0').'.sqlite');
+    $this->app->make(Kernel::class)->registerCommand(new FailingMigrateCommand);
+    unlink($template);
+
+    expect(fn () => $this->createTenantWithDatabase())->toThrow(LogicException::class, 'Migrating the tenant template failed: Migrations refused.')
+        ->and(tenant()?->getTenantKey())->toBe($this->tenant->getTenantKey())
+        ->and(is_file($template))->toBeFalse();
+});
+
+it('refuses to build the template into the central database without DatabaseTenancyBootstrapper', function (): void {
+    $template = database_path('tenancy_template_'.(ParallelTesting::token() ?: '0').'.sqlite');
+    tenancy()->end();
+    config(['tenancy.bootstrappers' => [SpatiePermissionsBootstrapper::class]]);
+    unlink($template);
+
+    expect(fn () => $this->createTenantWithDatabase())->toThrow(LogicException::class, 'needs Stancl\\Tenancy\\Bootstrappers\\DatabaseTenancyBootstrapper in tenancy.bootstrappers')
+        ->and(tenancy()->initialized)->toBeFalse()
+        ->and(Schema::hasTable('notes'))->toBeFalse()
+        ->and(is_file($template))->toBeFalse();
+});
+
+it('refuses to build the template into the current tenant database without DatabaseTenancyBootstrapper', function (): void {
+    $bootstrappers = config()->array('tenancy.bootstrappers');
+    config(['tenancy.bootstrappers' => [SpatiePermissionsBootstrapper::class]]);
+    unlink(database_path('tenancy_template_'.(ParallelTesting::token() ?: '0').'.sqlite'));
+
+    expect(fn () => $this->createTenantWithDatabase())->toThrow(LogicException::class, 'in tenancy.bootstrappers')
+        ->and(DB::table('notes')->count())->toBe(1);
+
+    config(['tenancy.bootstrappers' => $bootstrappers]);
+    tenancy()->end();
+});
+
 it('keys the template file to the parallel test token', function (): void {
-    ParallelTesting::resolveTokenUsing(fn (): string => '7');
+    $token = uniqid('token');
+    ParallelTesting::resolveTokenUsing(fn (): string => $token);
 
     $this->createTenantWithDatabase();
 
-    expect(is_file(database_path('tenancy_template_7.sqlite')))->toBeTrue();
+    expect(is_file(database_path("tenancy_template_{$token}.sqlite")))->toBeTrue();
 
-    unlink(database_path('tenancy_template_7.sqlite'));
+    unlink(database_path("tenancy_template_{$token}.sqlite"));
 });
 
 it('falls back to token 0 outside parallel testing', function (): void {
